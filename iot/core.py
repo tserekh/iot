@@ -1,8 +1,16 @@
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
 import cv2
+import pandas as pd
+from datetime import datetime, timedelta
+
 import json
+
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+import numpy as np
+
+from bokeh.layouts import  column
+from bokeh.models import CustomJS, Slider
+from bokeh.plotting import figure, output_file, ColumnDataSource, save
+
 
 def get_bitalino_df(bitalino_path: str, N: int, lux_colname='A6', sync_col='sync_col'):
     f = open(bitalino_path)
@@ -25,13 +33,14 @@ def get_bitalino_df(bitalino_path: str, N: int, lux_colname='A6', sync_col='sync
 
     df[sync_col] = df[lux_colname].astype(float) / df[lux_colname].astype(float).max()
     df = df.reset_index().rename(columns={'index': 'exp_time'})
-    df['exp_time'] = df['exp_time']/1000
+    df['exp_time'] = df['exp_time'] / 1000
     df['sysdatetime'] = datetime.strptime(dic['date'] + '_' + dic['time'], '%Y-%m-%d_%H:%M:%S.%f')  # .time()
-    df['sysdatetime'] = df['sysdatetime'] + df['exp_time'].apply(lambda x: timedelta(seconds=x - 3600*3))
+    df['sysdatetime'] = df['sysdatetime'] + df['exp_time'].apply(lambda x: timedelta(seconds=x - 3600 * 3))
     return df, dic
 
-def get_glasses_df(glasses_path,  N=3000):
-    cap = cv2.VideoCapture(glasses_path+'/world.mp4')
+
+def get_glasses_df(glasses_path, N=3000):
+    cap = cv2.VideoCapture(glasses_path + '/world.mp4')
 
     info_path = glasses_path + '/info.player.json'
     with open(info_path) as f:
@@ -52,15 +61,15 @@ def get_glasses_df(glasses_path,  N=3000):
 
     df = pd.DataFrame([brightness, timestamps], index=['brightness', 'exp_time']).T
     df['sync_col'] = df['brightness'] / df['brightness'].max()
-    df['exp_time'] = df['exp_time']/1000
+    df['exp_time'] = df['exp_time'] / 1000
     df['sysdatetime'] = df['exp_time'].apply(
         lambda x: timedelta(seconds=x) + datetime.utcfromtimestamp(dic['start_time_system_s']))
     return df, dic
 
-def get_tablet_df(tablet_path, N = 10000):
 
+def get_tablet_df(tablet_path, N=10000):
     df = pd.read_csv(tablet_path)
-    df['sync_col'] = df['illuminance (lx)']/df['illuminance (lx)'].max()
+    df['sync_col'] = df['illuminance (lx)'] / df['illuminance (lx)'].max()
     df['exp_time'] = (df['epoch (ms)'] - df['epoch (ms)'].min()) / 1000
     df['sysdatetime'] = df['epoch (ms)'].apply(lambda x: datetime.utcfromtimestamp(x / 1000))
     return df, {}
@@ -95,3 +104,52 @@ def get_opt_delta(df1, df2, deltas):
     min_error = errors.min()
     delta = deltas_return[errors == min_error][0]
     return delta, min_error
+
+
+def build_graphs(dic_df, base_name, sync_names, experiment_name, output_path):
+    js_pattern = """
+        const data = source.data;
+        {}
+        for (var i = 0; i < data['xs'][1].length; i++) {
+            data['xs'][1][i] = data['xs2'][1][i]+phase.value+phase2.value;
+        }
+        source.change.emit();
+    """
+
+    for sync_name in sync_names:
+        source_dict = dict(
+            xs=[dic_df[base_name]['exp_time'].values, dic_df[sync_name]['exp_time'].values],
+            ys=[dic_df[base_name]['sync_col'].values, dic_df[sync_name]['sync_col'].values],
+            line_color=['red', 'blue'] * 2
+        )
+
+        source_dict['xs2'] = source_dict['xs']
+
+        source_dict['legend'] = [base_name, sync_name] * 2
+        source_dict['line_width'] = [2] * 2 + [0] * 2
+
+        p = figure(width=1500, height=500)
+        source = ColumnDataSource(source_dict)
+        delta = dic_df[base_name]['sysdatetime'].iloc[0] - dic_df[sync_name]['sysdatetime'].iloc[0]
+        delta = delta.total_seconds()
+
+        phase_slider = Slider(start=delta - 100, end=delta + 100, value=delta, step=.1, title="Phase")
+        phase_slider2 = Slider(start=-2, end=2, value=0, step=.001, title="Phase2")
+
+        callback = CustomJS(args=dict(source=source, phase=phase_slider, phase2=phase_slider2),
+                            code=js_pattern.replace('{}', 'phase2.value=0;'))
+        callback2 = CustomJS(args=dict(source=source, phase=phase_slider, phase2=phase_slider2),
+                             code=js_pattern.replace('{}', ''))
+
+        phase_slider.js_on_change('value', callback)
+        phase_slider2.js_on_change('value', callback2)
+
+        p.multi_line(xs="xs", ys="ys", source=source,
+                     line_color='line_color',
+                     legend='legend',
+                     line_width='line_width'
+                     )
+
+        layout = column(p, phase_slider, phase_slider2)
+        output_file(f'{output_path}/{experiment_name}_{base_name}_{sync_name}.html')
+        save(layout)
