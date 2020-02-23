@@ -3,7 +3,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 
 import json
-
+import warnings
+from bokeh.util.warnings import BokehUserWarning
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 import numpy as np
 
@@ -107,6 +108,7 @@ def get_opt_delta(df1, df2, deltas):
 
 
 def build_graphs(dic_df, base_name, sync_names, experiment_name, output_path):
+    warnings.filterwarnings("ignore", category=BokehUserWarning)
     js_pattern = """
         const data = source.data;
         {}
@@ -117,24 +119,27 @@ def build_graphs(dic_df, base_name, sync_names, experiment_name, output_path):
     """
 
     for sync_name in sync_names:
+
+        delta = dic_df[sync_name]['sysdatetime'].iloc[0] - dic_df[base_name]['sysdatetime'].iloc[0]
+        delta = delta.total_seconds()
+
         source_dict = dict(
-            xs=[dic_df[base_name]['exp_time'].values, dic_df[sync_name]['exp_time'].values],
+            xs=[dic_df[base_name]['exp_time'].values, dic_df[sync_name]['exp_time'].values+delta],
             ys=[dic_df[base_name]['sync_col'].values, dic_df[sync_name]['sync_col'].values],
             line_color=['red', 'blue'] * 2
         )
 
-        source_dict['xs2'] = source_dict['xs']
+        source_dict['xs2'] = [dic_df[base_name]['exp_time'].values, dic_df[sync_name]['exp_time'].values]
 
-        source_dict['legend'] = [base_name, sync_name] * 2
+        source_dict['legend_label'] = [base_name, sync_name] * 2
         source_dict['line_width'] = [2] * 2 + [0] * 2
 
         p = figure(width=1500, height=500)
         source = ColumnDataSource(source_dict)
-        delta = dic_df[base_name]['sysdatetime'].iloc[0] - dic_df[sync_name]['sysdatetime'].iloc[0]
-        delta = delta.total_seconds()
 
-        phase_slider = Slider(start=delta - 100, end=delta + 100, value=delta, step=.1, title="Phase")
-        phase_slider2 = Slider(start=-2, end=2, value=0, step=.001, title="Phase2")
+
+        phase_slider = Slider(start=delta - 10, end=delta + 10, value=delta, step=.001, title="Phase")
+        phase_slider2 = Slider(start=-1, end=1, value=0, step=.001, title="Phase2")
 
         callback = CustomJS(args=dict(source=source, phase=phase_slider, phase2=phase_slider2),
                             code=js_pattern.replace('{}', 'phase2.value=0;'))
@@ -146,10 +151,10 @@ def build_graphs(dic_df, base_name, sync_names, experiment_name, output_path):
 
         p.multi_line(xs="xs", ys="ys", source=source,
                      line_color='line_color',
-                     legend='legend',
+                     legend_label='legend_label',
                      line_width='line_width'
                      )
 
-        layout = column(p, phase_slider, phase_slider2)
+        layout = column(p, phase_slider)
         output_file(f'{output_path}/{experiment_name}_{base_name}_{sync_name}.html')
         save(layout)

@@ -4,5 +4,4 @@ numpy
 glob2
 scikit-learn
 jupyter notebook
-jupyter lab
 bokeh
