@@ -1,3 +1,4 @@
+import os
 import cv2
 import pandas as pd
 from datetime import datetime, timedelta
@@ -41,13 +42,23 @@ def get_bitalino_df(bitalino_path: str, N: int, lux_colname='A6', sync_col='sync
 
 
 def get_glasses_df(glasses_path, N=3000):
-    cap = cv2.VideoCapture(glasses_path + '/world.mp4')
 
     info_path = glasses_path + '/info.player.json'
-    with open(info_path) as f:
-        dic = json.loads(f.read())
-
-    ok = True
+    if os.path.isfile(info_path):
+        #data from desktop
+        video_path = glasses_path + '/world.mp4'
+        with open(info_path) as f:
+            dic = json.loads(f.read())
+            start_time_system_s = dic['start_time_system_s']
+    else:
+        #data from mobile
+        info_path = glasses_path + '/info.csv'
+        video_path = glasses_path + '/Pupil Cam1 ID2.mp4'
+        with open(info_path) as f:
+            data =  f.read()
+            dic = dict(list(map(lambda x: x.split(','), data.split('\n')[1:-1])))
+            start_time_system_s = dic['Start Time (System)']
+    cap = cv2.VideoCapture(video_path)
     brightness = []
     timestamps = []
     for _ in range(N):
@@ -64,7 +75,7 @@ def get_glasses_df(glasses_path, N=3000):
     df['sync_col'] = df['brightness'] / df['brightness'].max()
     df['exp_time'] = df['exp_time'] / 1000
     df['sysdatetime'] = df['exp_time'].apply(
-        lambda x: timedelta(seconds=x) + datetime.utcfromtimestamp(dic['start_time_system_s']))
+        lambda x: timedelta(seconds=x) + datetime.utcfromtimestamp(float(start_time_system_s)))
     return df, dic
 
 
