@@ -11,6 +11,7 @@ import numpy as np
 
 from bokeh.layouts import  column
 from bokeh.models import CustomJS, Slider
+from bokeh.models.widgets import Div
 from bokeh.plotting import figure, output_file, ColumnDataSource, save
 
 
@@ -36,7 +37,10 @@ def get_bitalino_df(bitalino_path: str, N: int, lux_colname='A6', sync_col='sync
     df[sync_col] = df[lux_colname].astype(float) / df[lux_colname].astype(float).max()
     df = df.reset_index().rename(columns={'index': 'exp_time'})
     df['exp_time'] = df['exp_time'] / 1000
-    df['sysdatetime'] = datetime.strptime(dic['date'] + '_' + dic['time'], '%Y-%m-%d_%H:%M:%S.%f')  # .time()
+    date_pattern = '%Y-%m-%d_%H:%M:%S'
+    if '.' in dic['time']:
+        date_pattern += '.%f'
+    df['sysdatetime'] = datetime.strptime(dic['date'] + '_' + dic['time'], date_pattern)  # .time()
     df['sysdatetime'] = df['sysdatetime'] + df['exp_time'].apply(lambda x: timedelta(seconds=x - 3600 * 3))
     return df, dic
 
@@ -120,14 +124,15 @@ def get_opt_delta(df1, df2, deltas):
 
 def build_graphs(dic_df, base_name, sync_names, experiment_name, output_path):
     warnings.filterwarnings("ignore", category=BokehUserWarning)
-    js_pattern = """
+    js_pattern = '''
         const data = source.data;
         {}
         for (var i = 0; i < data['xs'][1].length; i++) {
             data['xs'][1][i] = data['xs2'][1][i]+phase.value+phase2.value;
         }
         source.change.emit();
-    """
+        document.getElementById("delta").innerHTML = String(Math.round((phase.value+phase2.value)*1000)/1000);
+    '''
 
     for sync_name in sync_names:
 
@@ -149,8 +154,8 @@ def build_graphs(dic_df, base_name, sync_names, experiment_name, output_path):
         source = ColumnDataSource(source_dict)
 
 
-        phase_slider = Slider(start=delta - 10, end=delta + 10, value=delta, step=.001, title="Phase")
-        phase_slider2 = Slider(start=-1, end=1, value=0, step=.001, title="Phase2")
+        phase_slider = Slider(start=delta - 500, end=delta + 500, value=delta, step=.001, title="Phase")
+        phase_slider2 = Slider(start=-10, end=10, value=0, step=.001, title="Phase2")
 
         callback = CustomJS(args=dict(source=source, phase=phase_slider, phase2=phase_slider2),
                             code=js_pattern.replace('{}', 'phase2.value=0;'))
@@ -165,7 +170,8 @@ def build_graphs(dic_df, base_name, sync_names, experiment_name, output_path):
                      legend_label='legend_label',
                      line_width='line_width'
                      )
-
-        layout = column(p, phase_slider)
+        div = Div(
+            text='''<p id="delta">{}</p>'''.format(delta))
+        layout = column(p, div, phase_slider, phase_slider2)
         output_file(f'{output_path}/{experiment_name}_{base_name}_{sync_name}.html')
         save(layout)
