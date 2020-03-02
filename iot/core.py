@@ -167,7 +167,6 @@ def build_graphs(dic_df, base_name, sync_names, experiment_name, output_path):
 
         p.multi_line(xs="xs", ys="ys", source=source,
                      line_color='line_color',
-                     legend_label='legend_label',
                      line_width='line_width'
                      )
         div = Div(
